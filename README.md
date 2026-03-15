@@ -1,1 +1,1 @@
-# vpinfe-theme-revolution
+# vpinfe-theme-template

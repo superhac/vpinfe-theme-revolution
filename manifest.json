@@ -1,10 +1,10 @@
 {
   "name": "Revolution",
-  "version": "1.0",
+  "version": "1.1",
   "author": "superhac",
   "description": "A desktop and cab theme with carousel and metadata.",
   "preview_image": "preview.png",
   "supported_screens": 3,
   "type": "both",
-  "change_log": ""
+  "change_log": "smoother animation and menu rotation fixed"
 }

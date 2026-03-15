@@ -12,6 +12,16 @@ tableRotationDegrees = 0;
 lastWheelMoveDirection = 0;
 lastHeroImageUrl = null;
 lastHeroBgUrl = null;
+lastRenderedTableIndex = -1;
+const mediaPreloadCache = new Map();
+let tableView = null;
+
+function setNodeText(node, value) {
+    const nextValue = value || '';
+    if (node.textContent !== nextValue) {
+        node.textContent = nextValue;
+    }
+}
 
 // Audio manager for table audio with crossfade.
 // Works on both backends:
@@ -137,7 +147,9 @@ vpin.ready.then(async () => {
     if (windowName === "table") {
         await applyTableLayout();
         window.addEventListener('resize', () => {
-            applyTableLayout().then(() => updateTableWindow());
+            applyTableLayout().then(() => {
+                updateTableWindow();
+            });
         });
     }
 
@@ -231,6 +243,7 @@ function updateScreen() {
     if (windowName === "table") {
         updateTableWindow();
         tableAudio.play(vpin.getAudioURL(currentTableIndex));
+        preloadNearbyMedia();
     } else if (windowName === "bg") {
         updateBGWindow();
     } else if (windowName === "dmd") {
@@ -241,12 +254,16 @@ function updateScreen() {
 // ---- Table Window (main screen) ----
 function updateTableWindow() {
     const container = document.getElementById('rootContainer');
-    container.innerHTML = '';
+    tableView = ensureTableView(container);
 
     if (!vpin.tableData || vpin.tableData.length === 0) {
-        container.innerHTML = '<div class="empty-state">No tables found</div>';
+        tableView.shell.style.display = 'none';
+        tableView.emptyState.style.display = 'flex';
         return;
     }
+
+    tableView.shell.style.display = '';
+    tableView.emptyState.style.display = 'none';
 
     const table = vpin.getTableMeta(currentTableIndex);
     const info = table.meta.Info || {};
@@ -270,71 +287,21 @@ function updateTableWindow() {
         { key: "altColorExists", label: "AltColor" },
         { key: "pupPackExists", label: "PuP-Pack" },
     ];
-    const shell = document.createElement('div');
-    shell.className = 'table-shell';
 
-    const wheelColumn = document.createElement('section');
-    wheelColumn.className = 'wheel-column';
-    wheelColumn.appendChild(buildWheelCarousel());
-
-    const heroColumn = document.createElement('section');
-    heroColumn.className = 'hero-column';
-
-    const titleBlock = document.createElement('div');
-    titleBlock.className = 'title-header';
     const wheelUrl = vpin.getImageURL(currentTableIndex, 'cab');
-    titleBlock.innerHTML = `
-        <div class="title-copy">
-            <div class="title-main">
-                <div class="title-wheel"></div>
-                <div class="title-text">
-                    <div class="eyebrow">${[manufacturer, year ? String(year) : '', tableType].filter(Boolean).map(escapeHtml).join(' / ')}</div>
-                    <h1 class="table-title">${escapeHtml(title)}</h1>
-                </div>
-            </div>
-        </div>
-    `;
-    const titleWheel = titleBlock.querySelector('.title-wheel');
-    const titleText = titleBlock.querySelector('.title-text');
-    if (hasUsableMedia(wheelUrl)) {
-        const wheelImg = document.createElement('img');
-        wheelImg.src = wheelUrl;
-        wheelImg.alt = title;
-        wheelImg.onerror = () => {
-            const fallback = document.createElement('div');
-            fallback.className = 'wheel-fallback';
-            fallback.textContent = title;
-            titleWheel.replaceChildren(fallback);
-        };
-        titleWheel.appendChild(wheelImg);
-    } else {
-        const fallback = document.createElement('div');
-        fallback.className = 'wheel-fallback';
-        fallback.textContent = title;
-        titleWheel.appendChild(fallback);
-    }
-    const metaLine = document.createElement('div');
-    metaLine.className = 'meta-line';
-    [authors].filter(Boolean).forEach(value => {
-        const pill = document.createElement('div');
-        pill.className = 'meta-pill';
-        pill.textContent = value;
-        metaLine.appendChild(pill);
+    updateWheelCarousel(tableView);
+    updateTitleBlock(tableView, {
+        eyebrow: [manufacturer, year ? String(year) : '', tableType].filter(Boolean).join(' / '),
+        title,
+        authors,
+        wheelUrl,
     });
-    titleText.appendChild(metaLine);
-    heroColumn.appendChild(titleBlock);
+    updateHeroMedia(tableView.heroMedia, title);
+    updateFeaturePanel(tableView.featurePanel, featureFlags, vpx);
+    updateFeaturePanel(tableView.addonPanel, addonFlags, vpx);
 
-    heroColumn.appendChild(buildHeroMedia(title));
-
-    const featureSections = document.createElement('div');
-    featureSections.className = 'feature-sections';
-    featureSections.appendChild(buildFeaturePanel('Features', featureFlags, vpx));
-    featureSections.appendChild(buildFeaturePanel('Add-ons', addonFlags, vpx));
-    heroColumn.appendChild(featureSections);
-
-    shell.appendChild(wheelColumn);
-    shell.appendChild(heroColumn);
-    container.appendChild(shell);
+    lastRenderedTableIndex = currentTableIndex;
+    lastWheelMoveDirection = 0;
 }
 
 // ---- BG Window (backglass) ----
@@ -429,6 +396,7 @@ function buildWheelCarousel() {
 
         const card = document.createElement('div');
         card.className = `wheel-card${offset === 0 ? ' active' : ''}${Math.abs(offset) === 1 ? ' dim-near' : ''}`;
+        card.dataset.offset = String(offset);
 
         if (hasUsableMedia(wheelUrl)) {
             const img = document.createElement('img');
@@ -452,112 +420,7 @@ function buildWheelCarousel() {
     }
 
     carousel.appendChild(track);
-    requestAnimationFrame(() => {
-        track.classList.remove('reel-next', 'reel-prev');
-    });
     return carousel;
-}
-
-function buildHeroMedia(title) {
-    const wrapper = document.createElement('div');
-    wrapper.className = 'hero-media';
-    const imageUrl = vpin.getImageURL(currentTableIndex, 'table');
-    const bgUrl = vpin.getImageURL(currentTableIndex, 'bg');
-
-    if (lastHeroImageUrl && lastHeroImageUrl !== imageUrl) {
-        const previousLayer = document.createElement('div');
-        previousLayer.className = 'hero-media-frame hero-media-layer is-active';
-
-        if (isTablePortrait && lastHeroBgUrl) {
-            const previousBg = document.createElement('img');
-            previousBg.className = 'hero-media-bg';
-            previousBg.src = lastHeroBgUrl;
-            previousBg.alt = '';
-            previousBg.setAttribute('aria-hidden', 'true');
-            previousLayer.appendChild(previousBg);
-
-            const previousBgOverlay = document.createElement('div');
-            previousBgOverlay.className = 'hero-media-bg-overlay';
-            previousLayer.appendChild(previousBgOverlay);
-        }
-
-        const previousImage = document.createElement('img');
-        previousImage.src = lastHeroImageUrl;
-        previousImage.alt = '';
-        previousImage.className = 'hero-media-asset';
-        applyMediaRotation(previousImage);
-        previousLayer.appendChild(previousImage);
-        wrapper.appendChild(previousLayer);
-
-        requestAnimationFrame(() => {
-            previousLayer.classList.add('is-exiting');
-            setTimeout(() => previousLayer.remove(), 240);
-        });
-    }
-
-    const frame = document.createElement('div');
-    frame.className = 'hero-media-frame hero-media-layer is-entering';
-
-    if (isTablePortrait) {
-        const bgImage = document.createElement('img');
-        bgImage.className = 'hero-media-bg';
-        bgImage.src = bgUrl;
-        bgImage.alt = '';
-        bgImage.setAttribute('aria-hidden', 'true');
-        bgImage.onerror = () => {
-            bgImage.style.display = 'none';
-        };
-        frame.appendChild(bgImage);
-
-        const bgOverlay = document.createElement('div');
-        bgOverlay.className = 'hero-media-bg-overlay';
-        frame.appendChild(bgOverlay);
-    }
-
-    const videoUrl = vpin.getVideoURL(currentTableIndex, 'table');
-    let activated = false;
-
-    const activateLayer = () => {
-        if (activated) return;
-        activated = true;
-        requestAnimationFrame(() => {
-            frame.classList.remove('is-entering');
-            frame.classList.add('is-active');
-        });
-    };
-
-    if (hasUsableMedia(videoUrl)) {
-        const video = document.createElement('video');
-        video.src = videoUrl;
-        video.poster = imageUrl;
-        video.autoplay = true;
-        video.loop = true;
-        video.muted = true;
-        video.playsInline = true;
-        video.className = 'hero-media-asset';
-        video.onerror = () => {
-            const fallback = buildHeroImage(imageUrl, title);
-            video.replaceWith(fallback);
-            applyMediaRotation(fallback);
-            activateLayer();
-        };
-        video.addEventListener('loadeddata', activateLayer, { once: true });
-        frame.appendChild(video);
-        applyMediaRotation(video);
-    } else {
-        const image = buildHeroImage(imageUrl, title);
-        image.addEventListener('load', activateLayer, { once: true });
-        frame.appendChild(image);
-        applyMediaRotation(image);
-    }
-
-    wrapper.appendChild(frame);
-
-    lastHeroImageUrl = imageUrl;
-    lastHeroBgUrl = bgUrl;
-    setTimeout(activateLayer, 60);
-
-    return wrapper;
 }
 
 function buildHeroImage(imageUrl, title) {
@@ -570,6 +433,40 @@ function buildHeroImage(imageUrl, title) {
         img.alt = `${title} media unavailable`;
     };
     return img;
+}
+
+function preloadImage(url) {
+    if (!hasUsableMedia(url)) return;
+    if (mediaPreloadCache.has(url)) return;
+
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = url;
+    const promise = img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+    mediaPreloadCache.set(url, promise);
+
+    // Keep cache bounded.
+    if (mediaPreloadCache.size > 18) {
+        const firstKey = mediaPreloadCache.keys().next().value;
+        mediaPreloadCache.delete(firstKey);
+    }
+}
+
+function preloadNearbyMedia() {
+    if (!vpin.tableData || vpin.getTableCount() === 0) return;
+
+    const indices = [
+        currentTableIndex,
+        wrapIndex(currentTableIndex - 1, vpin.getTableCount()),
+        wrapIndex(currentTableIndex + 1, vpin.getTableCount()),
+    ];
+
+    indices.forEach((index) => {
+        preloadImage(vpin.getImageURL(index, 'table'));
+        preloadImage(vpin.getImageURL(index, 'bg'));
+        preloadImage(vpin.getImageURL(index, 'wheel'));
+        preloadImage(vpin.getImageURL(index, 'cab'));
+    });
 }
 
 function buildDetailCard(label, value) {
@@ -603,6 +500,398 @@ function buildFeaturePanel(title, items, vpx) {
 
     panel.appendChild(strip);
     return panel;
+}
+
+function ensureTableView(container) {
+    if (tableView && tableView.container === container) return tableView;
+
+    container.innerHTML = '';
+
+    const emptyState = document.createElement('div');
+    emptyState.className = 'empty-state';
+    emptyState.textContent = 'No tables found';
+    emptyState.style.display = 'none';
+
+    const shell = document.createElement('div');
+    shell.className = 'table-shell';
+
+    const wheelColumn = document.createElement('section');
+    wheelColumn.className = 'wheel-column';
+    const carousel = document.createElement('div');
+    carousel.className = 'wheel-carousel';
+    const selectionHalo = document.createElement('div');
+    selectionHalo.className = 'wheel-selection-halo';
+    const wheelTrack = createWheelTrack();
+    carousel.appendChild(selectionHalo);
+    carousel.appendChild(wheelTrack);
+    wheelColumn.appendChild(carousel);
+
+    const heroColumn = document.createElement('section');
+    heroColumn.className = 'hero-column';
+
+    const titleHeader = document.createElement('div');
+    titleHeader.className = 'title-header';
+    titleHeader.innerHTML = `
+        <div class="title-copy">
+            <div class="title-main">
+                <div class="title-wheel"></div>
+                <div class="title-text">
+                    <div class="eyebrow"></div>
+                    <h1 class="table-title"></h1>
+                    <div class="meta-line"></div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const heroMedia = document.createElement('div');
+    heroMedia.className = 'hero-media';
+
+    const featureSections = document.createElement('div');
+    featureSections.className = 'feature-sections';
+    const featurePanel = buildFeaturePanel('Features', [], {});
+    const addonPanel = buildFeaturePanel('Add-ons', [], {});
+    featureSections.appendChild(featurePanel);
+    featureSections.appendChild(addonPanel);
+
+    heroColumn.appendChild(titleHeader);
+    heroColumn.appendChild(heroMedia);
+    heroColumn.appendChild(featureSections);
+
+    shell.appendChild(wheelColumn);
+    shell.appendChild(heroColumn);
+    container.appendChild(emptyState);
+    container.appendChild(shell);
+
+    tableView = {
+        container,
+        emptyState,
+        shell,
+        wheelCarousel: carousel,
+        wheelTrack,
+        titleHeader,
+        titleWheel: titleHeader.querySelector('.title-wheel'),
+        eyebrow: titleHeader.querySelector('.eyebrow'),
+        title: titleHeader.querySelector('.table-title'),
+        authorLine: titleHeader.querySelector('.meta-line'),
+        heroMedia,
+        featurePanel,
+        addonPanel,
+    };
+    return tableView;
+}
+
+function createWheelTrack() {
+    const wheelTrack = document.createElement('div');
+    wheelTrack.className = 'wheel-track';
+    for (let offset = -3; offset <= 3; offset += 1) {
+        const card = document.createElement('div');
+        card.className = 'wheel-card';
+        card.dataset.offset = String(offset);
+        wheelTrack.appendChild(card);
+    }
+    return wheelTrack;
+}
+
+function renderWheelCarousel(track, centerIndex) {
+    const cards = Array.from(track.children);
+    cards.forEach((card) => {
+        const offset = Number(card.dataset.offset || 0);
+        const index = wrapIndex(centerIndex + offset, vpin.getTableCount());
+        const table = vpin.getTableMeta(index);
+        const info = table.meta.Info || {};
+        const vpx = table.meta.VPXFile || {};
+        const title = info.Title || vpx.filename || table.tableDirName || 'Unknown Table';
+        const wheelUrl = vpin.getImageURL(index, 'wheel');
+        const isActive = offset === 0;
+        const isNear = Math.abs(offset) === 1;
+
+        card.className = `wheel-card${isActive ? ' active' : ''}${isNear ? ' dim-near' : ''}`;
+
+        let img = card.querySelector('img');
+        let fallback = card.querySelector('.wheel-fallback');
+
+        if (hasUsableMedia(wheelUrl)) {
+            if (!img) {
+                img = document.createElement('img');
+                img.onerror = () => {
+                    img.removeAttribute('src');
+                    img.style.display = 'none';
+                    let nextFallback = card.querySelector('.wheel-fallback');
+                    if (!nextFallback) {
+                        nextFallback = document.createElement('div');
+                        nextFallback.className = 'wheel-fallback';
+                        card.appendChild(nextFallback);
+                    }
+                    nextFallback.textContent = title;
+                    nextFallback.style.display = '';
+                };
+                card.appendChild(img);
+            }
+            img.alt = title;
+            if (img.src !== wheelUrl) {
+                img.src = wheelUrl;
+            }
+            img.style.display = '';
+            if (fallback) fallback.style.display = 'none';
+        } else {
+            if (!fallback) {
+                fallback = document.createElement('div');
+                fallback.className = 'wheel-fallback';
+                card.appendChild(fallback);
+            }
+            fallback.textContent = title;
+            fallback.style.display = '';
+            if (img) {
+                img.removeAttribute('src');
+                img.style.display = 'none';
+            }
+        }
+    });
+}
+
+function getWheelStep(track) {
+    const cards = Array.from(track.children);
+    if (cards.length < 2) return 0;
+    const first = cards[0];
+    const second = cards[1];
+    if (isTablePortrait) {
+        return second.offsetLeft - first.offsetLeft;
+    }
+    return second.offsetTop - first.offsetTop;
+}
+
+function updateWheelCarousel(view) {
+    const carousel = view.wheelCarousel;
+    let track = view.wheelTrack;
+    if (view.wheelTrackResetTimer) {
+        clearTimeout(view.wheelTrackResetTimer);
+        view.wheelTrackResetTimer = null;
+    }
+
+    const existingTracks = Array.from(carousel.querySelectorAll('.wheel-track'));
+    existingTracks.forEach((existingTrack) => {
+        existingTrack.getAnimations().forEach((animation) => animation.cancel());
+        existingTrack.classList.remove('wheel-track-transition');
+        existingTrack.style.transform = '';
+        existingTrack.style.zIndex = '';
+        if (existingTrack !== track) {
+            existingTrack.remove();
+        }
+    });
+
+    const canAnimate =
+        lastRenderedTableIndex !== -1 &&
+        lastWheelMoveDirection !== 0 &&
+        vpin.getTableCount() > 1;
+
+    if (!canAnimate) {
+        renderWheelCarousel(track, currentTableIndex);
+        return;
+    }
+
+    renderWheelCarousel(track, lastRenderedTableIndex);
+    const step = getWheelStep(track);
+    if (!step) {
+        renderWheelCarousel(track, currentTableIndex);
+        return;
+    }
+
+    const incomingTrack = createWheelTrack();
+    renderWheelCarousel(incomingTrack, currentTableIndex);
+    incomingTrack.classList.add('wheel-track-transition');
+    incomingTrack.style.zIndex = '2';
+    track.classList.add('wheel-track-transition');
+    track.style.zIndex = '1';
+    carousel.appendChild(incomingTrack);
+
+    const outgoingDelta = lastWheelMoveDirection > 0 ? -step : step;
+    const incomingStart = -outgoingDelta;
+    const translateValue = (value) => (
+        isTablePortrait ? `translateX(${value}px)` : `translateY(${value}px)`
+    );
+
+    incomingTrack.style.transform = translateValue(incomingStart);
+    incomingTrack.offsetWidth;
+
+    const animationDuration = 520;
+    const animationOptions = {
+        duration: animationDuration,
+        easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+        fill: 'forwards',
+    };
+
+    track.animate(
+        [
+            { transform: translateValue(0) },
+            { transform: translateValue(outgoingDelta) },
+        ],
+        animationOptions
+    );
+
+    incomingTrack.animate(
+        [
+            { transform: translateValue(incomingStart) },
+            { transform: translateValue(0) },
+        ],
+        animationOptions
+    );
+
+    view.wheelTrackResetTimer = setTimeout(() => {
+        track.remove();
+        incomingTrack.classList.remove('wheel-track-transition');
+        incomingTrack.style.transform = '';
+        incomingTrack.style.zIndex = '';
+        view.wheelTrack = incomingTrack;
+        view.wheelTrackResetTimer = null;
+    }, animationDuration);
+}
+
+function updateTitleBlock(view, data) {
+    setNodeText(view.eyebrow, data.eyebrow);
+    setNodeText(view.title, data.title);
+    setNodeText(view.authorLine, data.authors);
+    updateTitleWheel(view.titleWheel, data.wheelUrl, data.title);
+}
+
+function updateTitleWheel(container, imageUrl, title) {
+    let img = container.querySelector('img');
+    let fallback = container.querySelector('.wheel-fallback');
+    if (hasUsableMedia(imageUrl)) {
+        if (!img) {
+            img = document.createElement('img');
+            img.onerror = () => {
+                img.removeAttribute('src');
+                img.style.display = 'none';
+                let nextFallback = container.querySelector('.wheel-fallback');
+                if (!nextFallback) {
+                    nextFallback = document.createElement('div');
+                    nextFallback.className = 'wheel-fallback';
+                    container.appendChild(nextFallback);
+                }
+                nextFallback.textContent = title;
+                nextFallback.style.display = '';
+            };
+            container.appendChild(img);
+        }
+        img.alt = title;
+        if (img.src !== imageUrl) {
+            img.src = imageUrl;
+        }
+        img.style.display = '';
+        if (fallback) fallback.style.display = 'none';
+    } else {
+        if (!fallback) {
+            fallback = document.createElement('div');
+            fallback.className = 'wheel-fallback';
+            container.appendChild(fallback);
+        }
+        fallback.textContent = title;
+        fallback.style.display = '';
+        if (img) {
+            img.removeAttribute('src');
+            img.style.display = 'none';
+        }
+    }
+}
+
+function updateHeroMedia(container, title) {
+    const imageUrl = vpin.getImageURL(currentTableIndex, 'table');
+    const bgUrl = vpin.getImageURL(currentTableIndex, 'bg');
+    const previousLayer = container.querySelector('.hero-media-frame.is-active, .hero-media-frame');
+
+    if (
+        previousLayer &&
+        previousLayer.dataset.imageUrl === imageUrl &&
+        previousLayer.dataset.bgUrl === bgUrl
+    ) {
+        previousLayer.classList.remove('is-entering', 'is-exiting');
+        previousLayer.classList.add('is-active');
+        return;
+    }
+
+    const frame = document.createElement('div');
+    frame.className = 'hero-media-frame hero-media-layer is-entering';
+    frame.dataset.imageUrl = imageUrl;
+    frame.dataset.bgUrl = bgUrl;
+
+    if (isTablePortrait) {
+        const bgImage = document.createElement('img');
+        bgImage.className = 'hero-media-bg';
+        bgImage.src = bgUrl;
+        bgImage.alt = '';
+        bgImage.setAttribute('aria-hidden', 'true');
+        bgImage.onerror = () => {
+            bgImage.style.display = 'none';
+        };
+        frame.appendChild(bgImage);
+
+        const bgOverlay = document.createElement('div');
+        bgOverlay.className = 'hero-media-bg-overlay';
+        frame.appendChild(bgOverlay);
+    }
+
+    const videoUrl = vpin.getVideoURL(currentTableIndex, 'table');
+    let activated = false;
+    const activateLayer = () => {
+        if (activated) return;
+        activated = true;
+        requestAnimationFrame(() => {
+            frame.classList.remove('is-entering');
+            frame.classList.add('is-active');
+            if (previousLayer) {
+                previousLayer.classList.add('is-exiting');
+                setTimeout(() => previousLayer.remove(), 220);
+            }
+        });
+    };
+
+    if (hasUsableMedia(videoUrl)) {
+        const video = document.createElement('video');
+        video.src = videoUrl;
+        video.poster = imageUrl;
+        video.autoplay = true;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.className = 'hero-media-asset';
+        video.onerror = () => {
+            const fallback = buildHeroImage(imageUrl, title);
+            video.replaceWith(fallback);
+            applyMediaRotation(fallback);
+            activateLayer();
+        };
+        video.addEventListener('loadeddata', activateLayer, { once: true });
+        frame.appendChild(video);
+        applyMediaRotation(video);
+    } else {
+        const image = buildHeroImage(imageUrl, title);
+        if (image.complete) {
+            activateLayer();
+        } else {
+            image.addEventListener('load', activateLayer, { once: true });
+            image.addEventListener('error', activateLayer, { once: true });
+        }
+        frame.appendChild(image);
+        applyMediaRotation(image);
+    }
+
+    container.appendChild(frame);
+    lastHeroImageUrl = imageUrl;
+    lastHeroBgUrl = bgUrl;
+    setTimeout(activateLayer, 16);
+}
+
+function updateFeaturePanel(panel, items, vpx) {
+    const strip = panel.querySelector('.feature-strip');
+    strip.innerHTML = '';
+    items.forEach(({ key, label }) => {
+        const tag = document.createElement('div');
+        const isOn = isTruthyFlag(vpx[key]);
+        tag.className = `feature-tag${isOn ? ' active' : ''}`;
+        tag.textContent = label;
+        strip.appendChild(tag);
+    });
 }
 
 function getTableSubtitle() {
@@ -649,6 +938,7 @@ async function applyTableLayout() {
     if (windowName !== "table") return;
 
     const screen = document.getElementById('tableScreen');
+    const overlayRoot = document.getElementById('overlay-root');
     if (!screen) return;
 
     const cabMode = await vpin.call("get_cab_mode");
@@ -672,6 +962,22 @@ async function applyTableLayout() {
         ? `rotate(${rotationDegree}deg) scale(${scale})`
         : `scale(${scale})`;
     screen.style.visibility = "visible";
+
+    if (overlayRoot) {
+        if (rotationDegree !== 0) {
+            overlayRoot.style.width = `${baseWidth}px`;
+            overlayRoot.style.height = `${baseHeight}px`;
+            overlayRoot.style.top = '50%';
+            overlayRoot.style.left = '50%';
+            overlayRoot.style.transform = `translate(-50%, -50%) rotate(${rotationDegree}deg) scale(${scale})`;
+        } else {
+            overlayRoot.style.width = '100vw';
+            overlayRoot.style.height = '100vh';
+            overlayRoot.style.top = '0';
+            overlayRoot.style.left = '0';
+            overlayRoot.style.transform = 'none';
+        }
+    }
 
     document.body.classList.toggle('table-screen-portrait', isTablePortrait);
     document.body.classList.toggle('table-screen-cab', Boolean(cabMode));
