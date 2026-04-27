@@ -15,6 +15,9 @@ lastHeroBgUrl = null;
 lastRenderedTableIndex = -1;
 const mediaPreloadCache = new Map();
 let tableView = null;
+let wheelMode = 'tables';
+let collectionEntries = [];
+let currentCollectionIndex = 0;
 
 function setNodeText(node, value) {
     const nextValue = value || '';
@@ -51,7 +54,7 @@ vpin.ready.then(async () => {
         await applyTableLayout();
         window.addEventListener('resize', () => {
             applyTableLayout().then(() => {
-                updateTableWindow();
+                updateScreen();
             });
         });
     }
@@ -69,6 +72,9 @@ async function receiveEvent(message) {
 
     // Handle UI updates based on event type
     if (message.type == "TableIndexUpdate") {
+        if (isCollectionMode()) {
+            leaveCollectionMode();
+        }
         currentTableIndex = message.index;
         updateScreen();
     }
@@ -90,6 +96,9 @@ async function receiveEvent(message) {
         fadeIn();
     }
     else if (message.type == "TableDataChange") {
+        if (isCollectionMode()) {
+            leaveCollectionMode();
+        }
         currentTableIndex = message.index;
         updateScreen();
     }
@@ -103,6 +112,12 @@ async function receiveEvent(message) {
 async function handleInput(input) {
     switch (input) {
         case "joyleft":
+            if (isCollectionMode()) {
+                lastWheelMoveDirection = -1;
+                currentCollectionIndex = wrapIndex(currentCollectionIndex - 1, collectionEntries.length);
+                updateScreen();
+                break;
+            }
             lastWheelMoveDirection = -1;
             currentTableIndex = wrapIndex(currentTableIndex - 1, vpin.tableData.length);
             updateScreen();
@@ -114,6 +129,12 @@ async function handleInput(input) {
             });
             break;
         case "joyright":
+            if (isCollectionMode()) {
+                lastWheelMoveDirection = 1;
+                currentCollectionIndex = wrapIndex(currentCollectionIndex + 1, collectionEntries.length);
+                updateScreen();
+                break;
+            }
             lastWheelMoveDirection = 1;
             currentTableIndex = wrapIndex(currentTableIndex + 1, vpin.tableData.length);
             updateScreen();
@@ -125,13 +146,21 @@ async function handleInput(input) {
             });
             break;
         case "joyselect":
+            if (isCollectionMode()) {
+                await selectCurrentCollection();
+                break;
+            }
             vpin.stopTableAudio();
             vpin.sendMessageToAllWindows({ type: "TableLaunching" });
             await fadeOut();
             await vpin.launchTable(currentTableIndex);
             break;
         case "joyback":
-            // do something on joyback if you want
+            if (isCollectionMode()) {
+                leaveCollectionMode();
+            } else {
+                await enterCollectionMode();
+            }
             break;
     }
 }
@@ -141,6 +170,10 @@ async function handleInput(input) {
 // to branch logic per window.
 function updateScreen() {
     if (windowName === "table") {
+        if (isCollectionMode()) {
+            updateCollectionWindow();
+            return;
+        }
         updateTableWindow();
         vpin.playTableAudio(currentTableIndex);
         preloadNearbyMedia();
@@ -151,6 +184,10 @@ function updateScreen() {
     }
 }
 
+function isCollectionMode() {
+    return wheelMode === 'collections';
+}
+
 // ---- Table Window (main screen) ----
 function updateTableWindow() {
     const container = document.getElementById('rootContainer');
@@ -159,6 +196,7 @@ function updateTableWindow() {
     if (!vpin.tableData || vpin.tableData.length === 0) {
         tableView.shell.style.display = 'none';
         tableView.emptyState.style.display = 'flex';
+        tableView.emptyState.textContent = 'No tables found';
         return;
     }
 
@@ -204,6 +242,39 @@ function updateTableWindow() {
     lastWheelMoveDirection = 0;
 }
 
+function updateCollectionWindow() {
+    const container = document.getElementById('rootContainer');
+    tableView = ensureTableView(container);
+
+    if (!collectionEntries.length) {
+        tableView.shell.style.display = 'none';
+        tableView.emptyState.style.display = 'flex';
+        tableView.emptyState.textContent = 'No collections found';
+        return;
+    }
+
+    tableView.shell.style.display = '';
+    tableView.emptyState.style.display = 'none';
+
+    const data = getCollectionDisplayData(currentCollectionIndex);
+    updateWheelCarousel(tableView);
+    updateTitleBlock(tableView, {
+        eyebrow: data.eyebrow,
+        title: data.title,
+        authors: data.authors,
+        wheelUrl: data.wheelUrl,
+    });
+    updateHeroMedia(tableView.heroMedia, data.title);
+    updateFeaturePanel(tableView.featurePanel, data.featureFlags, {
+        collectionActive: true,
+        collectionCount: true,
+    });
+    updateFeaturePanel(tableView.addonPanel, [], {});
+
+    lastRenderedTableIndex = currentCollectionIndex;
+    lastWheelMoveDirection = 0;
+}
+
 // ---- BG Window (backglass) ----
 function updateBGWindow() {
     const container = document.getElementById('rootContainer');
@@ -237,6 +308,89 @@ function updateDMDWindow() {
 // circular table index
 function wrapIndex(index, length) {
     return (index + length) % length;
+}
+
+function getCollectionDisplayData(index) {
+    const collection = collectionEntries[index] || {};
+    const tableCount = Number(collection.table_count);
+    const countText = Number.isFinite(tableCount)
+        ? `${tableCount} ${tableCount === 1 ? 'Table' : 'Tables'}`
+        : (collection.is_filter ? 'Filter Collection' : 'Collection');
+    const imageUrl = collection.image_url || '';
+
+    return {
+        title: collection.name || 'Collection',
+        eyebrow: collection.type === 'filter' ? 'Filter collection' : 'Collection',
+        authors: countText,
+        wheelUrl: imageUrl,
+        heroUrl: imageUrl,
+        bgUrl: imageUrl,
+        featureFlags: [
+            { key: 'collectionActive', label: collection.type === 'filter' ? 'Filter' : 'Collection' },
+            { key: 'collectionCount', label: countText },
+        ],
+        collection,
+    };
+}
+
+async function enterCollectionMode() {
+    if (windowName !== 'table') {
+        return;
+    }
+
+    try {
+        const metadata = await vpin.call('get_collections_metadata');
+        collectionEntries = Array.isArray(metadata) ? metadata.filter((entry) => entry && entry.name) : [];
+    } catch (error) {
+        vpin.call('console_out', `Unable to load collections: ${error.message || error}`);
+        collectionEntries = [];
+    }
+
+    if (!collectionEntries.length) {
+        return;
+    }
+
+    wheelMode = 'collections';
+    currentCollectionIndex = 0;
+    lastRenderedTableIndex = -1;
+    lastWheelMoveDirection = 0;
+    lastHeroImageUrl = null;
+    lastHeroBgUrl = null;
+    document.body.classList.add('collection-wheel-mode');
+    updateScreen();
+}
+
+async function selectCurrentCollection() {
+    const collection = collectionEntries[currentCollectionIndex];
+    if (!collection?.name) {
+        return;
+    }
+
+    wheelMode = 'tables';
+    document.body.classList.remove('collection-wheel-mode');
+    await vpin.call('set_tables_by_collection', collection.name);
+    await vpin.getTableData();
+    currentTableIndex = 0;
+    lastRenderedTableIndex = -1;
+    lastWheelMoveDirection = 0;
+    lastHeroImageUrl = null;
+    lastHeroBgUrl = null;
+    updateScreen();
+    vpin.sendMessageToAllWindows({
+        type: 'TableDataChange',
+        index: currentTableIndex,
+        collection: collection.name
+    });
+}
+
+function leaveCollectionMode() {
+    wheelMode = 'tables';
+    document.body.classList.remove('collection-wheel-mode');
+    lastRenderedTableIndex = -1;
+    lastWheelMoveDirection = 0;
+    lastHeroImageUrl = null;
+    lastHeroBgUrl = null;
+    updateScreen();
 }
 
 function formatAuthors(authors) {
@@ -526,18 +680,29 @@ function createWheelTrack() {
 
 function renderWheelCarousel(track, centerIndex) {
     const cards = Array.from(track.children);
+    const itemCount = isCollectionMode() ? collectionEntries.length : vpin.getTableCount();
+    if (!itemCount) return;
+
     cards.forEach((card) => {
         const offset = Number(card.dataset.offset || 0);
-        const index = wrapIndex(centerIndex + offset, vpin.getTableCount());
-        const table = vpin.getTableMeta(index);
-        const info = table.meta.Info || {};
-        const vpx = table.meta.VPXFile || {};
-        const title = info.Title || vpx.filename || table.tableDirName || 'Unknown Table';
-        const wheelUrl = vpin.getImageURL(index, 'wheel');
+        const index = wrapIndex(centerIndex + offset, itemCount);
+        let title;
+        let wheelUrl;
+        if (isCollectionMode()) {
+            const data = getCollectionDisplayData(index);
+            title = data.title;
+            wheelUrl = data.wheelUrl;
+        } else {
+            const table = vpin.getTableMeta(index);
+            const info = table.meta.Info || {};
+            const vpx = table.meta.VPXFile || {};
+            title = info.Title || vpx.filename || table.tableDirName || 'Unknown Table';
+            wheelUrl = vpin.getImageURL(index, 'wheel');
+        }
         const isActive = offset === 0;
         const isNear = Math.abs(offset) === 1;
 
-        card.className = `wheel-card${isActive ? ' active' : ''}${isNear ? ' dim-near' : ''}`;
+        card.className = `wheel-card${isActive ? ' active' : ''}${isNear ? ' dim-near' : ''}${isCollectionMode() ? ' collection-card' : ''}`;
 
         let img = card.querySelector('img');
         let fallback = card.querySelector('.wheel-fallback');
@@ -614,10 +779,10 @@ function updateWheelCarousel(view) {
     const canAnimate =
         lastRenderedTableIndex !== -1 &&
         lastWheelMoveDirection !== 0 &&
-        vpin.getTableCount() > 1;
+        (isCollectionMode() ? collectionEntries.length : vpin.getTableCount()) > 1;
 
     if (!canAnimate) {
-        renderWheelCarousel(track, currentTableIndex);
+        renderWheelCarousel(track, isCollectionMode() ? currentCollectionIndex : currentTableIndex);
         return;
     }
 
@@ -629,7 +794,7 @@ function updateWheelCarousel(view) {
     }
 
     const incomingTrack = createWheelTrack();
-    renderWheelCarousel(incomingTrack, currentTableIndex);
+    renderWheelCarousel(incomingTrack, isCollectionMode() ? currentCollectionIndex : currentTableIndex);
     incomingTrack.classList.add('wheel-track-transition');
     incomingTrack.style.zIndex = '2';
     track.classList.add('wheel-track-transition');
@@ -727,8 +892,35 @@ function updateTitleWheel(container, imageUrl, title) {
 }
 
 function updateHeroMedia(container, title) {
-    const imageUrl = vpin.getImageURL(currentTableIndex, 'table');
-    const bgUrl = vpin.getImageURL(currentTableIndex, 'bg');
+    const collectionData = isCollectionMode() ? getCollectionDisplayData(currentCollectionIndex) : null;
+    const imageUrl = collectionData ? collectionData.heroUrl : vpin.getImageURL(currentTableIndex, 'table');
+    const bgUrl = collectionData ? collectionData.bgUrl : vpin.getImageURL(currentTableIndex, 'bg');
+
+    if (isCollectionMode()) {
+        const existingLayer = container.querySelector('.hero-media-frame');
+        if (
+            existingLayer &&
+            existingLayer.dataset.imageUrl === imageUrl &&
+            existingLayer.dataset.bgUrl === bgUrl &&
+            container.children.length === 1
+        ) {
+            return;
+        }
+
+        const frame = document.createElement('div');
+        frame.className = 'hero-media-frame hero-media-layer is-active';
+        frame.dataset.imageUrl = imageUrl;
+        frame.dataset.bgUrl = bgUrl;
+
+        const image = buildHeroImage(imageUrl, title);
+        image.classList.add('collection-hero-image');
+        frame.appendChild(image);
+        container.replaceChildren(frame);
+        lastHeroImageUrl = imageUrl;
+        lastHeroBgUrl = bgUrl;
+        return;
+    }
+
     const previousLayer = container.querySelector('.hero-media-frame.is-active, .hero-media-frame');
 
     if (
@@ -746,7 +938,7 @@ function updateHeroMedia(container, title) {
     frame.dataset.imageUrl = imageUrl;
     frame.dataset.bgUrl = bgUrl;
 
-    if (isTablePortrait) {
+    if (isTablePortrait && !isCollectionMode()) {
         const bgImage = document.createElement('img');
         bgImage.className = 'hero-media-bg';
         bgImage.src = bgUrl;
@@ -762,7 +954,7 @@ function updateHeroMedia(container, title) {
         frame.appendChild(bgOverlay);
     }
 
-    const videoUrl = vpin.getVideoURL(currentTableIndex, 'table');
+    const videoUrl = isCollectionMode() ? null : vpin.getVideoURL(currentTableIndex, 'table');
     let activated = false;
     const activateLayer = () => {
         if (activated) return;
@@ -789,7 +981,11 @@ function updateHeroMedia(container, title) {
         video.onerror = () => {
             const fallback = buildHeroImage(imageUrl, title);
             video.replaceWith(fallback);
-            applyMediaRotation(fallback);
+            if (isCollectionMode()) {
+                fallback.classList.add('collection-hero-image');
+            } else {
+                applyMediaRotation(fallback);
+            }
             activateLayer();
         };
         video.addEventListener('loadeddata', activateLayer, { once: true });
@@ -797,6 +993,9 @@ function updateHeroMedia(container, title) {
         applyMediaRotation(video);
     } else {
         const image = buildHeroImage(imageUrl, title);
+        if (isCollectionMode()) {
+            image.classList.add('collection-hero-image');
+        }
         if (image.complete) {
             activateLayer();
         } else {
@@ -804,7 +1003,9 @@ function updateHeroMedia(container, title) {
             image.addEventListener('error', activateLayer, { once: true });
         }
         frame.appendChild(image);
-        applyMediaRotation(image);
+        if (!isCollectionMode()) {
+            applyMediaRotation(image);
+        }
     }
 
     container.appendChild(frame);

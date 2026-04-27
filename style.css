@@ -282,6 +282,17 @@ body:not(.table-screen-portrait) .wheel-card.active .wheel-fallback {
   color: rgba(245, 241, 232, 0.84);
 }
 
+body.collection-wheel-mode .wheel-card img,
+body.collection-wheel-mode .wheel-card .wheel-fallback {
+  max-width: 72%;
+  max-height: 72%;
+}
+
+body.collection-wheel-mode .wheel-card.active img,
+body.collection-wheel-mode .wheel-card.active .wheel-fallback {
+  max-height: 82%;
+}
+
 .carousel-hint {
   display: flex;
   justify-content: space-between;
@@ -349,6 +360,14 @@ body:not(.table-screen-portrait) .wheel-card.active .wheel-fallback {
   max-width: none;
   max-height: none;
   object-fit: contain;
+}
+
+body.collection-wheel-mode .title-wheel img,
+body.collection-wheel-mode .title-wheel .wheel-fallback {
+  width: auto;
+  height: auto;
+  max-width: 72%;
+  max-height: 72%;
 }
 
 .eyebrow {
@@ -461,6 +480,20 @@ body:not(.table-screen-portrait) .wheel-card.active .wheel-fallback {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+body.collection-wheel-mode .hero-media img.collection-hero-image {
+  width: auto;
+  height: auto;
+  max-width: 72%;
+  max-height: 72%;
+  object-fit: contain;
+}
+
+body.collection-wheel-mode .hero-media {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(124, 227, 235, 0.12), transparent 42%),
+    rgba(7, 10, 13, 0.72);
 }
 
 .hero-overlay {
