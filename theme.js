@@ -18,6 +18,7 @@ let tableView = null;
 let wheelMode = 'tables';
 let collectionEntries = [];
 let currentCollectionIndex = 0;
+const collectionBackgroundUrl = "img/collection_background.png";
 
 function setNodeText(node, value) {
     const nextValue = value || '';
@@ -59,8 +60,17 @@ vpin.ready.then(async () => {
         });
     }
 
-    // Initialize the display
-    updateScreen();
+    const startInCollectionSelection = Boolean(config?.startCollectionSelection);
+
+    if (windowName === "table" && startInCollectionSelection) {
+        await enterCollectionMode();
+        if (!isCollectionMode()) {
+            updateScreen();
+        }
+    } else {
+        // Initialize the display
+        updateScreen();
+    }
 });
 
 // Listener for window events. VPinFECore uses this to send events to all windows.
@@ -323,8 +333,8 @@ function getCollectionDisplayData(index) {
         eyebrow: collection.type === 'filter' ? 'Filter collection' : 'Collection',
         authors: countText,
         wheelUrl: imageUrl,
-        heroUrl: imageUrl,
-        bgUrl: imageUrl,
+        heroUrl: collectionBackgroundUrl,
+        bgUrl: collectionBackgroundUrl,
         featureFlags: [
             { key: 'collectionActive', label: collection.type === 'filter' ? 'Filter' : 'Collection' },
             { key: 'collectionCount', label: countText },
@@ -1048,22 +1058,54 @@ function applyMediaRotation(element) {
     const swapAxes = normalized === 90 || normalized === 270;
     const mediaRotation = swapAxes ? -tableRotationDegrees : tableRotationDegrees;
     if (swapAxes) {
-        element.style.width = '177.78%';
-        element.style.height = '56.25%';
-        element.style.maxWidth = 'none';
-        element.style.maxHeight = 'none';
-        element.style.objectFit = 'fill';
+        element.style.width = "177.78%";
+        element.style.height = "56.25%";
+        element.style.maxWidth = "none";
+        element.style.maxHeight = "none";
+        element.style.objectFit = "fill";
         element.style.transform = `rotate(${mediaRotation}deg)`;
     } else {
-        element.style.width = '100%';
-        element.style.height = '100%';
-        element.style.maxWidth = '';
-        element.style.maxHeight = '';
-        element.style.objectFit = 'cover';
+        element.style.width = "100%";
+        element.style.height = "100%";
+        element.style.maxWidth = "";
+        element.style.maxHeight = "";
+        element.style.objectFit = "cover";
         element.style.transform = mediaRotation !== 0
             ? `rotate(${mediaRotation}deg)`
-            : 'none';
+            : "none";
     }
+}
+
+function ensureMenuOverlayContainer() {
+    const overlayRoot = document.getElementById("overlay-root");
+    if (!overlayRoot) return null;
+
+    let container = document.getElementById("menu-overlay-container");
+    if (!container) {
+        container = document.createElement("div");
+        container.id = "menu-overlay-container";
+        overlayRoot.appendChild(container);
+    }
+
+    Array.from(overlayRoot.children).forEach((child) => {
+        if (child !== container) {
+            container.appendChild(child);
+        }
+    });
+
+    if (!overlayRoot._menuObserver) {
+        const observer = new MutationObserver(() => {
+            Array.from(overlayRoot.children).forEach((child) => {
+                if (child !== container) {
+                    container.appendChild(child);
+                }
+            });
+        });
+        observer.observe(overlayRoot, { childList: true });
+        overlayRoot._menuObserver = observer;
+    }
+
+    return container;
 }
 
 async function applyTableLayout() {
@@ -1074,41 +1116,45 @@ async function applyTableLayout() {
     if (!screen) return;
 
     const cabMode = await vpin.call("get_cab_mode");
-    const rotationDegree = await vpin.call("get_table_rotation");
+    const rotationDegree = Number(await vpin.call("get_table_rotation")) || 0;
     tableRotationDegrees = rotationDegree;
     const normalized = ((rotationDegree % 360) + 360) % 360;
     const swapAxes = normalized === 90 || normalized === 270;
     isTablePortrait = swapAxes;
 
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const baseWidth = swapAxes ? 1080 : 1920;
-    const baseHeight = swapAxes ? 1920 : 1080;
-    const scale = swapAxes
-        ? Math.min(vw / baseHeight, vh / baseWidth)
-        : Math.min(vw / baseWidth, vh / baseHeight);
+    const surfaceWidth = swapAxes ? window.innerHeight : window.innerWidth;
+    const surfaceHeight = swapAxes ? window.innerWidth : window.innerHeight;
+    const menuRotation =
+        normalized === 90 ? 90 :
+        normalized === 180 ? 90 :
+        normalized === 270 ? 270 :
+        0;
+    const menuSwapAxes = Math.abs(menuRotation) === 90 || Math.abs(menuRotation) === 270;
+    const root = document.documentElement;
+    root.style.setProperty("--menu-width", menuSwapAxes ? "50vh" : "50vw");
+    root.style.setProperty("--menu-height", menuSwapAxes ? "50vw" : "50vh");
 
-    screen.style.width = `${baseWidth}px`;
-    screen.style.height = `${baseHeight}px`;
+    screen.style.width = `${surfaceWidth}px`;
+    screen.style.height = `${surfaceHeight}px`;
     screen.style.transform = rotationDegree !== 0
-        ? `rotate(${rotationDegree}deg) scale(${scale})`
-        : `scale(${scale})`;
+        ? `rotate(${rotationDegree}deg)`
+        : "none";
     screen.style.visibility = "visible";
 
     if (overlayRoot) {
-        if (rotationDegree !== 0) {
-            overlayRoot.style.width = `${baseWidth}px`;
-            overlayRoot.style.height = `${baseHeight}px`;
-            overlayRoot.style.top = '50%';
-            overlayRoot.style.left = '50%';
-            overlayRoot.style.transform = `translate(-50%, -50%) rotate(${rotationDegree}deg) scale(${scale})`;
-        } else {
-            overlayRoot.style.width = '100vw';
-            overlayRoot.style.height = '100vh';
-            overlayRoot.style.top = '0';
-            overlayRoot.style.left = '0';
-            overlayRoot.style.transform = 'none';
-        }
+        overlayRoot.style.width = `${surfaceWidth}px`;
+        overlayRoot.style.height = `${surfaceHeight}px`;
+        overlayRoot.style.top = '50%';
+        overlayRoot.style.left = '50%';
+        overlayRoot.style.transform = 'translate(-50%, -50%)';
+    }
+
+    const menuOverlay = ensureMenuOverlayContainer();
+    if (menuOverlay) {
+        menuOverlay.style.transformOrigin = "center center";
+        menuOverlay.style.transform = menuRotation !== 0
+            ? `rotate(${menuRotation}deg)`
+            : "none";
     }
 
     document.body.classList.toggle('table-screen-portrait', isTablePortrait);
