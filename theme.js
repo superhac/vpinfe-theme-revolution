@@ -938,6 +938,9 @@ function updateHeroMedia(container, title) {
         previousLayer.dataset.imageUrl === imageUrl &&
         previousLayer.dataset.bgUrl === bgUrl
     ) {
+        if (!isCollectionMode()) {
+            previousLayer.querySelectorAll('.hero-media-asset').forEach(applyMediaRotation);
+        }
         previousLayer.classList.remove('is-entering', 'is-exiting');
         previousLayer.classList.add('is-active');
         return;
@@ -947,22 +950,6 @@ function updateHeroMedia(container, title) {
     frame.className = 'hero-media-frame hero-media-layer is-entering';
     frame.dataset.imageUrl = imageUrl;
     frame.dataset.bgUrl = bgUrl;
-
-    if (isTablePortrait && !isCollectionMode()) {
-        const bgImage = document.createElement('img');
-        bgImage.className = 'hero-media-bg';
-        bgImage.src = bgUrl;
-        bgImage.alt = '';
-        bgImage.setAttribute('aria-hidden', 'true');
-        bgImage.onerror = () => {
-            bgImage.style.display = 'none';
-        };
-        frame.appendChild(bgImage);
-
-        const bgOverlay = document.createElement('div');
-        bgOverlay.className = 'hero-media-bg-overlay';
-        frame.appendChild(bgOverlay);
-    }
 
     const videoUrl = isCollectionMode() ? null : vpin.getVideoURL(currentTableIndex, 'table');
     let activated = false;
@@ -1019,6 +1006,9 @@ function updateHeroMedia(container, title) {
     }
 
     container.appendChild(frame);
+    if (!isCollectionMode()) {
+        frame.querySelectorAll('.hero-media-asset').forEach(applyMediaRotation);
+    }
     lastHeroImageUrl = imageUrl;
     lastHeroBgUrl = bgUrl;
     setTimeout(activateLayer, 16);
@@ -1057,24 +1047,51 @@ function applyMediaRotation(element) {
     const normalized = ((tableRotationDegrees % 360) + 360) % 360;
     const swapAxes = normalized === 90 || normalized === 270;
     const viewportPortrait = window.innerHeight > window.innerWidth;
+    const signedRotation = normalized === 270 ? -90 : normalized;
     const mediaRotation = swapAxes
-        ? -tableRotationDegrees
+        ? (viewportPortrait ? 0 : signedRotation)
         : (viewportPortrait ? -90 : tableRotationDegrees);
     const rotateMedia = Math.abs(mediaRotation) === 90 || Math.abs(mediaRotation) === 270;
+    const flipMedia = !viewportPortrait && normalized === 270;
 
     if (rotateMedia) {
-        element.style.width = "177.78%";
-        element.style.height = "56.25%";
+        const sizeToFrame = () => {
+            const frame = element.closest('.hero-media-frame') || element.parentElement;
+            const frameWidth = frame?.clientWidth || frame?.offsetWidth || 0;
+            const frameHeight = frame?.clientHeight || frame?.offsetHeight || 0;
+            if (frameWidth > 0 && frameHeight > 0) {
+                element.style.width = `${frameHeight}px`;
+                element.style.height = `${frameWidth}px`;
+            } else {
+                element.style.width = window.innerHeight > window.innerWidth ? "177.78%" : "56.25%";
+                element.style.height = window.innerHeight > window.innerWidth ? "56.25%" : "177.78%";
+            }
+        };
+
+        sizeToFrame();
+        requestAnimationFrame(sizeToFrame);
+        element.style.position = "absolute";
+        element.style.top = "50%";
+        element.style.left = "50%";
         element.style.maxWidth = "none";
         element.style.maxHeight = "none";
-        element.style.objectFit = "fill";
-        element.style.transform = `rotate(${mediaRotation}deg)`;
+        element.style.minWidth = "0";
+        element.style.minHeight = "0";
+        element.style.objectFit = "cover";
+        element.style.transformOrigin = "center center";
+        element.style.transform = `translate(-50%, -50%) rotate(${mediaRotation}deg)${flipMedia ? " scaleX(-1)" : ""}`;
     } else {
+        element.style.position = "";
+        element.style.top = "";
+        element.style.left = "";
         element.style.width = "100%";
         element.style.height = "100%";
         element.style.maxWidth = "";
         element.style.maxHeight = "";
+        element.style.minWidth = "";
+        element.style.minHeight = "";
         element.style.objectFit = "cover";
+        element.style.transformOrigin = "";
         element.style.transform = mediaRotation !== 0
             ? `rotate(${mediaRotation}deg)`
             : "none";
@@ -1128,15 +1145,23 @@ async function applyTableLayout() {
     const viewportPortrait = window.innerHeight > window.innerWidth;
     isTablePortrait = swapAxes || viewportPortrait;
 
-    const surfaceWidth = window.innerWidth;
-    const surfaceHeight = window.innerHeight;
+    const surfaceWidth = swapAxes ? window.innerHeight : window.innerWidth;
+    const surfaceHeight = swapAxes ? window.innerWidth : window.innerHeight;
+    const menuRotation =
+        normalized === 90 ? 90 :
+        normalized === 180 ? 90 :
+        normalized === 270 ? 270 :
+        0;
+    const menuSwapAxes = Math.abs(menuRotation) === 90 || Math.abs(menuRotation) === 270;
     const root = document.documentElement;
-    root.style.setProperty("--menu-width", "50vw");
-    root.style.setProperty("--menu-height", "50vh");
+    root.style.setProperty("--menu-width", menuSwapAxes ? "50vh" : "50vw");
+    root.style.setProperty("--menu-height", menuSwapAxes ? "50vw" : "50vh");
 
     screen.style.width = `${surfaceWidth}px`;
     screen.style.height = `${surfaceHeight}px`;
-    screen.style.transform = "none";
+    screen.style.transform = rotationDegree !== 0
+        ? `rotate(${rotationDegree}deg)`
+        : "none";
     screen.style.visibility = "visible";
 
     if (overlayRoot) {
@@ -1150,7 +1175,9 @@ async function applyTableLayout() {
     const menuOverlay = ensureMenuOverlayContainer();
     if (menuOverlay) {
         menuOverlay.style.transformOrigin = "center center";
-        menuOverlay.style.transform = "none";
+        menuOverlay.style.transform = menuRotation !== 0
+            ? `rotate(${menuRotation}deg)`
+            : "none";
     }
 
     document.body.classList.toggle('table-screen-portrait', isTablePortrait);
