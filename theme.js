@@ -1050,7 +1050,7 @@ function applyMediaRotation(element) {
     const viewportPortrait = tableDisplayPortrait;
     const signedRotation = normalized === 270 ? -90 : normalized;
     const mediaRotation = viewportPortrait
-        ? 180
+        ? (normalized === 0 ? 270 : 180)
         : (swapAxes ? signedRotation : tableRotationDegrees);
     const rotateMedia = Math.abs(mediaRotation) === 90 || Math.abs(mediaRotation) === 270;
     const flipMedia = !viewportPortrait && normalized === 270;
