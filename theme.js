@@ -8,6 +8,7 @@ windowName = ""
 currentTableIndex = 0;
 config = null;
 isTablePortrait = false;
+tableDisplayPortrait = false;
 tableRotationDegrees = 0;
 lastWheelMoveDirection = 0;
 lastHeroImageUrl = null;
@@ -1046,11 +1047,11 @@ function applyMediaRotation(element) {
 
     const normalized = ((tableRotationDegrees % 360) + 360) % 360;
     const swapAxes = normalized === 90 || normalized === 270;
-    const viewportPortrait = window.innerHeight > window.innerWidth;
+    const viewportPortrait = tableDisplayPortrait;
     const signedRotation = normalized === 270 ? -90 : normalized;
-    const mediaRotation = swapAxes
-        ? (viewportPortrait ? 180 : signedRotation)
-        : (viewportPortrait ? -90 : tableRotationDegrees);
+    const mediaRotation = viewportPortrait
+        ? 180
+        : (swapAxes ? signedRotation : tableRotationDegrees);
     const rotateMedia = Math.abs(mediaRotation) === 90 || Math.abs(mediaRotation) === 270;
     const flipMedia = !viewportPortrait && normalized === 270;
 
@@ -1063,8 +1064,8 @@ function applyMediaRotation(element) {
                 element.style.width = `${frameHeight}px`;
                 element.style.height = `${frameWidth}px`;
             } else {
-                element.style.width = window.innerHeight > window.innerWidth ? "177.78%" : "56.25%";
-                element.style.height = window.innerHeight > window.innerWidth ? "56.25%" : "177.78%";
+                element.style.width = tableDisplayPortrait ? "177.78%" : "56.25%";
+                element.style.height = tableDisplayPortrait ? "56.25%" : "177.78%";
             }
         };
 
@@ -1138,12 +1139,13 @@ async function applyTableLayout() {
     if (!screen) return;
 
     const cabMode = await vpin.call("get_cab_mode");
+    const tableOrientation = String(await vpin.call("get_table_orientation") || "").toLowerCase();
     const rotationDegree = Number(await vpin.call("get_table_rotation")) || 0;
     tableRotationDegrees = rotationDegree;
     const normalized = ((rotationDegree % 360) + 360) % 360;
     const swapAxes = normalized === 90 || normalized === 270;
-    const viewportPortrait = window.innerHeight > window.innerWidth;
-    isTablePortrait = swapAxes || viewportPortrait;
+    tableDisplayPortrait = tableOrientation === "portrait";
+    isTablePortrait = swapAxes || tableDisplayPortrait;
 
     const surfaceWidth = swapAxes ? window.innerHeight : window.innerWidth;
     const surfaceHeight = swapAxes ? window.innerWidth : window.innerHeight;
