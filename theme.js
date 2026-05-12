@@ -1056,8 +1056,13 @@ function applyMediaRotation(element) {
 
     const normalized = ((tableRotationDegrees % 360) + 360) % 360;
     const swapAxes = normalized === 90 || normalized === 270;
-    const mediaRotation = swapAxes ? -tableRotationDegrees : tableRotationDegrees;
-    if (swapAxes) {
+    const viewportPortrait = window.innerHeight > window.innerWidth;
+    const mediaRotation = swapAxes
+        ? -tableRotationDegrees
+        : (viewportPortrait ? -90 : tableRotationDegrees);
+    const rotateMedia = Math.abs(mediaRotation) === 90 || Math.abs(mediaRotation) === 270;
+
+    if (rotateMedia) {
         element.style.width = "177.78%";
         element.style.height = "56.25%";
         element.style.maxWidth = "none";
@@ -1120,25 +1125,18 @@ async function applyTableLayout() {
     tableRotationDegrees = rotationDegree;
     const normalized = ((rotationDegree % 360) + 360) % 360;
     const swapAxes = normalized === 90 || normalized === 270;
-    isTablePortrait = swapAxes;
+    const viewportPortrait = window.innerHeight > window.innerWidth;
+    isTablePortrait = swapAxes || viewportPortrait;
 
-    const surfaceWidth = swapAxes ? window.innerHeight : window.innerWidth;
-    const surfaceHeight = swapAxes ? window.innerWidth : window.innerHeight;
-    const menuRotation =
-        normalized === 90 ? 90 :
-        normalized === 180 ? 90 :
-        normalized === 270 ? 270 :
-        0;
-    const menuSwapAxes = Math.abs(menuRotation) === 90 || Math.abs(menuRotation) === 270;
+    const surfaceWidth = window.innerWidth;
+    const surfaceHeight = window.innerHeight;
     const root = document.documentElement;
-    root.style.setProperty("--menu-width", menuSwapAxes ? "50vh" : "50vw");
-    root.style.setProperty("--menu-height", menuSwapAxes ? "50vw" : "50vh");
+    root.style.setProperty("--menu-width", "50vw");
+    root.style.setProperty("--menu-height", "50vh");
 
     screen.style.width = `${surfaceWidth}px`;
     screen.style.height = `${surfaceHeight}px`;
-    screen.style.transform = rotationDegree !== 0
-        ? `rotate(${rotationDegree}deg)`
-        : "none";
+    screen.style.transform = "none";
     screen.style.visibility = "visible";
 
     if (overlayRoot) {
@@ -1152,9 +1150,7 @@ async function applyTableLayout() {
     const menuOverlay = ensureMenuOverlayContainer();
     if (menuOverlay) {
         menuOverlay.style.transformOrigin = "center center";
-        menuOverlay.style.transform = menuRotation !== 0
-            ? `rotate(${menuRotation}deg)`
-            : "none";
+        menuOverlay.style.transform = "none";
     }
 
     document.body.classList.toggle('table-screen-portrait', isTablePortrait);
