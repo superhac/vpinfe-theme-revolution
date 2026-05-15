@@ -53,6 +53,12 @@ vpin.ready.then(async () => {
     config = await vpin.call("get_theme_config");
 
     if (windowName === "table") {
+        vpin.enableCoreAudio(true);
+        vpin.setAudioOptions({
+            maxVolume: 0.8,
+            fadeDuration: 350,
+            loop: true
+        });
         await applyTableLayout();
         window.addEventListener('resize', () => {
             applyTableLayout().then(() => {
