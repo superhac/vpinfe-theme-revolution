@@ -1059,7 +1059,6 @@ function applyMediaRotation(element) {
         ? (normalized === 0 ? 90 : 180)
         : (swapAxes ? signedRotation : tableRotationDegrees);
     const rotateMedia = Math.abs(mediaRotation) === 90 || Math.abs(mediaRotation) === 270;
-    const flipMedia = !viewportPortrait && normalized === 270;
 
     if (rotateMedia) {
         const sizeToFrame = () => {
@@ -1086,7 +1085,7 @@ function applyMediaRotation(element) {
         element.style.minHeight = "0";
         element.style.objectFit = "cover";
         element.style.transformOrigin = "center center";
-        element.style.transform = `translate(-50%, -50%) rotate(${mediaRotation}deg)${flipMedia ? " scaleX(-1)" : ""}`;
+        element.style.transform = `translate(-50%, -50%) rotate(${mediaRotation}deg)`;
     } else {
         element.style.position = "";
         element.style.top = "";
