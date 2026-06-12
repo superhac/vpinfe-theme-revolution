@@ -1117,6 +1117,7 @@ function ensureMenuOverlayContainer() {
     Array.from(overlayRoot.children).forEach((child) => {
         if (child !== container) {
             container.appendChild(child);
+            applyMenuFrameFit(child);
         }
     });
 
@@ -1125,6 +1126,7 @@ function ensureMenuOverlayContainer() {
             Array.from(overlayRoot.children).forEach((child) => {
                 if (child !== container) {
                     container.appendChild(child);
+                    applyMenuFrameFit(child);
                 }
             });
         });
@@ -1133,6 +1135,49 @@ function ensureMenuOverlayContainer() {
     }
 
     return container;
+}
+
+function applyMenuFrameFit(frame) {
+    if (!frame || frame.id !== "menu-frame" || frame._revolutionFitApplied) return;
+
+    const injectFitStyles = () => {
+        try {
+            const doc = frame.contentDocument;
+            if (!doc || doc.getElementById("revolution-menu-fit")) return;
+
+            const style = doc.createElement("style");
+            style.id = "revolution-menu-fit";
+            style.textContent = `
+                #menu-container {
+                    padding: 16.5% 10% 21%;
+                }
+
+                ul.menu {
+                    transform: none;
+                }
+
+                li.menu-item {
+                    padding-top: clamp(6px, 1.35vmin, 20px);
+                    padding-bottom: clamp(6px, 1.35vmin, 20px);
+                    margin-bottom: clamp(3px, 0.72vmin, 12px);
+                    font-size: clamp(14px, 2.05vh, 34px);
+                }
+
+                #menu-qr-panels {
+                    bottom: 4.8%;
+                    transform: translateX(-50%) scale(0.84);
+                    transform-origin: bottom center;
+                }
+            `;
+            doc.head.appendChild(style);
+        } catch (_e) {
+            // Same-origin during normal VPinFE use; ignore if the iframe is not ready yet.
+        }
+    };
+
+    frame._revolutionFitApplied = true;
+    frame.addEventListener("load", injectFitStyles);
+    injectFitStyles();
 }
 
 async function applyTableLayout() {
@@ -1160,8 +1205,12 @@ async function applyTableLayout() {
         0;
     const menuSwapAxes = Math.abs(menuRotation) === 90 || Math.abs(menuRotation) === 270;
     const root = document.documentElement;
-    root.style.setProperty("--menu-width", menuSwapAxes ? "50vh" : "50vw");
-    root.style.setProperty("--menu-height", menuSwapAxes ? "50vw" : "50vh");
+    root.style.setProperty(
+        "--menu-width",
+        menuSwapAxes
+            ? "min(82vh, calc(82vw * 1.5), 1800px)"
+            : "min(82vw, calc(82vh * 1.5), 1800px)"
+    );
 
     screen.style.width = `${surfaceWidth}px`;
     screen.style.height = `${surfaceHeight}px`;

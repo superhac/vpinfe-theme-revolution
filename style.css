@@ -63,8 +63,11 @@ body {
 
 #menu-frame,
 #collection-menu-frame {
-  width: var(--menu-width, 50vw);
-  height: var(--menu-height, 50vh);
+  width: var(--menu-width, min(82vw, calc(82vh * 1.5), 1800px));
+  height: auto;
+  aspect-ratio: 3 / 2;
+  border: none;
+  background: transparent;
 }
 
 .table-shell {
