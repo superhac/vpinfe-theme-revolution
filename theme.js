@@ -128,7 +128,7 @@ async function pageTables(direction) {
     if (typeof index !== "number" || index < 0 || index === currentTableIndex) {
         return;
     }
-    lastWheelMoveDirection = index > currentTableIndex ? 1 : -1;
+    lastWheelMoveDirection = 0;   // a page jump is not a one-step slide
     currentTableIndex = index;
     updateScreen();
     vpin.sendMessageToAllWindows({ type: 'TableIndexUpdate', index: currentTableIndex });
